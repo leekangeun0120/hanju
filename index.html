@@ -4,12 +4,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="한주한장">
+<meta name="apple-mobile-web-app-title" content="투두리스트">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{height:100%}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
-<title>한주한장</title>
+<title>투두리스트</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 </head><body>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -220,6 +220,7 @@ function setCal(s){const d=parse(s);calY=d.getFullYear();calM=d.getMonth()}
 /* ---------- data ---------- */
 function ruleOn(r,d){
   if(d<r.start)return false;
+  if(r.until&&d>r.until)return false;
   const D=parse(d),St=parse(r.start);
   switch(r.freq){
     case'daily':return true;
@@ -237,7 +238,8 @@ function itemsFor(d){
 }
 const findItem=(d,id)=>itemsFor(d).find(x=>x.id===id);
 const ruleById=id=>S.repeats.find(r=>r.id===id);
-function freqLabel(r){
+function freqLabel(r){return freqBase(r)+(r.until?` ~${md(r.until)}`:'')}
+function freqBase(r){
   if(r.freq==='daily')return'매일';
   if(r.freq==='weekdays')return'평일마다';
   if(r.freq==='weekly'){const w=(r.dow||[]).slice().sort();if(w.join()==='1,2,3,4,5')return'평일마다';if(w.length===7)return'매일';return'매주 '+w.map(i=>DOW[i]).join('·')}
@@ -361,7 +363,7 @@ function render(){
   $('#rangeT').textContent=`${A.getMonth()+1}월 ${A.getDate()}일 – ${B.getMonth()+1}월 ${B.getDate()}일`;
   $('#yearT').textContent=A.getFullYear()===B.getFullYear()?A.getFullYear()+'년':`${A.getFullYear()}–${B.getFullYear()}년`;
   $('#banner').hidden=!S.sample;
-  let h=`<section class="tile cal" aria-label="달력">${calHTML()}<div class="brand"><i></i><i></i>한주한장</div></section>`;
+  let h=`<section class="tile cal" aria-label="달력">${calHTML()}<div class="brand"><i></i><i></i>투두리스트</div></section>`;
   for(let i=0;i<7;i++){
     const d=addD(ws,i),D=parse(d),its=itemsFor(d);
     h+=`<section class="tile day${d===td?' today':''}${i===0?' sun':''}" data-date="${d}" aria-label="${D.getMonth()+1}월 ${D.getDate()}일 ${DOW[i]}요일">
@@ -469,7 +471,8 @@ function openSheet(o){
       <div class="fld"><label for="fT">할 일</label><input class="inp" id="fT" maxlength="80" placeholder="예) 현장 점검 10시" value="${esc(all?rule.t:st.text)}" autocomplete="off"></div>
       ${all?`<p class="note">반복 일정 전체의 이름과 주기를 바꿔요. 시작일 ${md(rule.start)}</p>`:`<div class="fld"><label for="fD">날짜</label><input class="inp" type="date" id="fD" value="${st.date}"></div>`}
       ${(!isR||all)?`<div class="fld"><label>반복</label><div class="row" id="fq">${(all?[]:[['none','안 함']]).concat([['daily','매일'],['weekdays','평일'],['weekly','매주'],['monthly','매월'],['yearly','매년']]).map(([k,l])=>`<button class="chip" data-f="${k}" aria-pressed="${freq===k}">${l}</button>`).join('')}</div></div>
-      <div class="fld" id="dw" ${freq==='weekly'?'':'hidden'}><label>요일</label><div class="row">${DOW.map((w,i)=>`<button class="chip dow" data-w="${i}" aria-pressed="${(all?rule.dow||[]:st.dow).includes(i)}">${w}</button>`).join('')}</div></div>`:''}
+      <div class="fld" id="dw" ${freq==='weekly'?'':'hidden'}><label>요일</label><div class="row">${DOW.map((w,i)=>`<button class="chip dow" data-w="${i}" aria-pressed="${(all?rule.dow||[]:st.dow).includes(i)}">${w}</button>`).join('')}</div></div>
+      <div class="fld" id="uw" ${freq!=='none'?'':'hidden'}><label for="fU">반복 끝나는 날 · 비워두면 계속</label><div class="row" style="flex-wrap:nowrap"><input class="inp" type="date" id="fU" value="${all?(rule.until||''):''}" style="flex:1;min-width:0"><button class="chip" id="uClr" type="button">계속</button></div></div>`:''}
       ${o.mode==='edit'&&!all?`<div class="acts" style="margin-bottom:8px"><button class="btn half" id="pull">‹ 하루 당기기</button><button class="btn half" id="push">하루 미루기 ›</button></div>`:''}
       <div class="acts">${o.mode==='edit'?`<button class="btn del" id="del">${all?'반복 삭제':'삭제'}</button>`:''}<button class="btn" id="cancel">닫기</button><button class="btn pri" id="save">${o.mode==='add'?'추가':'저장'}</button></div>`);
     const T=$('#fT');if(o.mode==='add')setTimeout(()=>T.focus(),60);
@@ -480,12 +483,13 @@ function openSheet(o){
     layer.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{
       if(all){rule._freq=b.dataset.f}else st.freq=b.dataset.f;
       layer.querySelectorAll('[data-f]').forEach(x=>x.setAttribute('aria-pressed',x===b));
-      $('#dw').hidden=b.dataset.f!=='weekly';
+      $('#dw').hidden=b.dataset.f!=='weekly';$('#uw').hidden=b.dataset.f==='none';
     });
     layer.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{
       const on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',on);
     });
     $('#cancel').onclick=close;$('#save').onclick=save;
+    if($('#uClr'))$('#uClr').onclick=()=>{$('#fU').value=''};
     if($('#pull'))$('#pull').onclick=()=>{moveItem(o.d,it,addD(o.d,-1));close()};
     if($('#push'))$('#push').onclick=()=>{moveItem(o.d,it,addD(o.d,1));close()};
     if($('#del'))$('#del').onclick=()=>{
@@ -498,12 +502,14 @@ function openSheet(o){
       const text=T.value.trim();if(!text){T.focus();return}
       const dows=[...layer.querySelectorAll('[data-w][aria-pressed="true"]')].map(b=>+b.dataset.w);
       if(all){
+        const u=$('#fU').value;if(u&&u<rule.start){toast('끝나는 날은 시작일('+md(rule.start)+') 이후로 골라주세요');return}
+        if(u)rule.until=u;else delete rule.until;
         rule.t=text;const f=rule._freq||rule.freq;rule.freq=f;if(f==='weekly')rule.dow=dows.length?dows:[parse(rule.start).getDay()];
         delete rule._freq;delete rule._draft;touchS();
       }else{
         const date=st.date;
         if(st.freq!=='none'&&(!isR)){
-          const r={id:uid(),t:text,freq:st.freq,start:date};if(st.freq==='weekly')r.dow=dows.length?dows:[parse(date).getDay()];
+          const r={id:uid(),t:text,freq:st.freq,start:date};const u=$('#fU').value;if(u){if(u<date){toast('끝나는 날은 '+md(date)+' 이후로 골라주세요');return}r.until=u}if(st.freq==='weekly')r.dow=dows.length?dows:[parse(date).getDay()];
           S.repeats.push(r);touchS();
           if(it)removeTask(o.d,it.id);
           toast(freqLabel(r)+' 반복으로 등록했어요');
@@ -570,16 +576,16 @@ function backupText(){return JSON.stringify({app:'hanjuhanjang',v:1,at:new Date(
 function markBk(){try{localStorage.setItem(BK,today())}catch(e){}}
 function lastBk(){let d=null;try{d=localStorage.getItem(BK)}catch(e){}return d?`마지막 백업 ${md(d)}. `:'아직 백업한 적이 없어요. '}
 async function saveBackup(){
-  const name=`한주한장_백업_${today()}.json`,blob=new Blob([backupText()],{type:'application/json'});
+  const name=`투두리스트_백업_${today()}.json`,blob=new Blob([backupText()],{type:'application/json'});
   try{const f=new File([blob],name,{type:'application/json'});
-    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'한주한장 백업'});markBk();toast('백업 파일을 보냈어요');return}}catch(e){if(e&&e.name==='AbortError')return}
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'투두리스트 백업'});markBk();toast('백업 파일을 보냈어요');return}}catch(e){if(e&&e.name==='AbortError')return}
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
   markBk();toast('백업 파일을 저장했어요');
 }
 function parseBackup(t){try{const o=JSON.parse(String(t).trim());const d=o&&o.app==='hanjuhanjang'?o.data:o;if(d&&typeof d.days==='object'&&Array.isArray(d.repeats))return d}catch(e){}return null}
 function confirmImport(t){
   const d=parseBackup(t);
-  if(!d){toast('한주한장 백업이 아니에요. 코드를 다시 확인해 주세요');return}
+  if(!d){toast('투두리스트 백업이 아니에요. 코드를 다시 확인해 주세요');return}
   const n=Object.values(d.days).reduce((a,x)=>a+x.length,0)+d.repeats.length;
   modal(`<h2>백업 불러오기</h2><p class="note">일정 ${n}개(반복 ${d.repeats.length}개 포함)가 들어 있어요. 불러오면 지금 이 기기의 일정은 백업 내용으로 바뀌어요.</p>
     <div class="acts"><button class="btn" id="no">취소</button><button class="btn pri" id="yes">불러오기</button></div>`);
