@@ -176,6 +176,7 @@ body.dragging{cursor:grabbing}
 .res button{width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;padding:11px 4px;display:flex;gap:10px;align-items:baseline}
 .res .when{flex:none;width:84px;font-size:12px;color:var(--b);font-family:var(--num)}
 .res mark{background:var(--ysoft);color:inherit;border-radius:3px}
+.tbtn{border:0;background:none;color:var(--y);font-weight:700;margin-left:12px;padding:0;font-size:13px}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 90px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:13px;z-index:40;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -184,6 +185,7 @@ body.dragging{cursor:grabbing}
   <header class="top">
     <button class="round" id="prev" aria-label="지난주"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 3 5 8l5 5"/></svg></button>
     <div class="range"><h1 id="rangeT">-</h1><div class="yr"><span id="yearT"></span><span class="sync" id="syncT">불러오는 중</span></div></div>
+    <button class="round" id="undoB" aria-label="되돌리기" title="되돌리기" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a3.5 3.5 0 0 1 0 7H6"/></svg></button>
     <button class="pill" id="todayB">오늘</button>
     <button class="round" id="next" aria-label="다음 주"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 3 5 5-5 5"/></svg></button>
   </header>
@@ -310,11 +312,11 @@ async function connect(){
   let first=true;
   col.onSnapshot(snap=>{
     if(first){first=false;mode='db';
-      if(snap.empty){ if(!S.sample&&hasAny())touchAll(); setSync('계정에 저장됨',true); render(); return }
+      if(snap.empty){ if(!S.sample&&hasAny())touchAll(); setSync('계정에 저장됨',true); skipTrack=true; render(); return }
       const keepSample=false; S=Object.assign(blank(),{settings:S.settings});
     }
     snap.docs.forEach(doc=>{if(dirty.has(doc.id.slice(2))||inflight.has(doc.id)||(doc.id==='settings'&&(dirtyS||inflight.has('settings'))))return;if(doc.exists)applyDoc(doc.id,doc.data())});
-    saveLocal();applyLook();render();if(!flushing&&!dirty.size)setSync('계정에 저장됨',true);
+    saveLocal();applyLook();skipTrack=true;render();if(!flushing&&!dirty.size)setSync('계정에 저장됨',true);
   },()=>{setSync('동기화 연결 끊김 · 이 기기에 저장',false)});
 }
 function hasAny(){return Object.keys(S.days).length||S.repeats.length}
@@ -350,7 +352,11 @@ function applyLook(){const r=document.documentElement;r.dataset.skin=S.settings.
 
 /* ---------- render ---------- */
 const grid=$('#grid');
+let undoStack=[],cur=null,skipTrack=false;
+function trackUndo(){const j=JSON.stringify(S);if(cur!==null&&j!==cur&&!skipTrack){undoStack.push(cur);if(undoStack.length>40)undoStack.shift()}cur=j;skipTrack=false;$('#undoB').hidden=!undoStack.length}
+function undo(){if(!undoStack.length)return;touchAll();S=JSON.parse(undoStack.pop());cur=JSON.stringify(S);skipTrack=true;applyLook();touchAll();render();toast('되돌렸어요')}
 function render(){
+  trackUndo();
   const ws=weekStart,we=addD(ws,6),A=parse(ws),B=parse(we),td=today();
   $('#rangeT').textContent=`${A.getMonth()+1}월 ${A.getDate()}일 – ${B.getMonth()+1}월 ${B.getDate()}일`;
   $('#yearT').textContent=A.getFullYear()===B.getFullYear()?A.getFullYear()+'년':`${A.getFullYear()}–${B.getFullYear()}년`;
@@ -382,6 +388,7 @@ function goWeek(d,flash){weekStart=sunOf(d);setCal(d);render();if(flash){const e
 /* ---------- nav ---------- */
 $('#prev').onclick=()=>{weekStart=addD(weekStart,-7);setCal(addD(weekStart,3));render()};
 $('#next').onclick=()=>{weekStart=addD(weekStart,7);setCal(addD(weekStart,3));render()};
+$('#undoB').onclick=undo;
 $('#todayB').onclick=()=>goWeek(today(),true);
 $('#clearEx').onclick=clearSample;
 $('#fabB').onclick=()=>{const td=today();openSheet({mode:'add',d:sunOf(td)===weekStart?td:weekStart})};
@@ -482,9 +489,9 @@ function openSheet(o){
     if($('#pull'))$('#pull').onclick=()=>{moveItem(o.d,it,addD(o.d,-1));close()};
     if($('#push'))$('#push').onclick=()=>{moveItem(o.d,it,addD(o.d,1));close()};
     if($('#del'))$('#del').onclick=()=>{
-      if(all){S.repeats=S.repeats.filter(r=>r.id!==rule.id);touchS();toast('반복 일정을 지웠어요')}
-      else if(it.kind==='r'){S.rskip[it.id]=1;delete S.rdone[it.id];touch(o.d);toast('이 날 일정만 지웠어요')}
-      else removeTask(o.d,it.id);
+      if(all){S.repeats=S.repeats.filter(r=>r.id!==rule.id);touchS();toast('반복 일정을 지웠어요',1)}
+      else if(it.kind==='r'){S.rskip[it.id]=1;delete S.rdone[it.id];touch(o.d);toast('이 날 일정만 지웠어요',1)}
+      else{removeTask(o.d,it.id);toast('삭제했어요',1)}
       close();render();
     };
     function save(){
@@ -553,7 +560,7 @@ function openSettings(){
   if($('#ex'))$('#ex').onclick=()=>{close();clearSample()};
   $('#wipe').onclick=()=>{
     if(!armed){armed=true;$('#wipe').textContent='한 번 더 누르면 전부 지워져요';return}
-    touchAll();const keep=S.settings;S=blank();S.settings=keep;touchAll();close();render();toast('모든 일정을 지웠어요');
+    touchAll();const keep=S.settings;S=blank();S.settings=keep;touchAll();close();render();toast('모든 일정을 지웠어요',1);
   };
 }
 
@@ -588,7 +595,7 @@ function openPaste(prefill){
   $('#no').onclick=close;if(!prefill)$('#yes').onclick=()=>confirmImport(ta.value);
 }
 
-let toastT;function toast(t){let el=$('.toast');if(!el){el=document.createElement('div');el.className='toast';el.setAttribute('role','status');document.body.appendChild(el)}el.textContent=t;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,2200)}
+let toastT;function toast(t,canUndo){let el=$('.toast');if(!el){el=document.createElement('div');el.className='toast';el.setAttribute('role','status');document.body.appendChild(el)}el.textContent=t;if(canUndo){const b=document.createElement('button');b.className='tbtn';b.textContent='되돌리기';b.onclick=()=>{el.hidden=true;undo()};el.append(b)}el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,canUndo?4500:2200)}
 
 /* ---------- boot ---------- */
 try{const raw=localStorage.getItem(LS);if(raw){const v=JSON.parse(raw);S=Object.assign(blank(),v)}}catch(e){}
