@@ -535,16 +535,57 @@ function openSettings(){
     <div class="fld"><label>테마</label><div class="skins">${skins.map(([k,l,a,b])=>`<button class="skin" data-s="${k}" aria-pressed="${S.settings.skin===k}"><span class="sw"><i style="background:${a}"></i><i style="background:${b}"></i></span>${l}</button>`).join('')}</div></div>
     <div class="fld"><label>서체</label><div class="fonts">${fonts.map(([k,l,f])=>`<button class="fontb" data-ft="${k}" aria-pressed="${S.settings.font===k}" style="font-family:'${f}',sans-serif">오늘 할 일<small>${l}</small></button>`).join('')}</div></div>
     <p class="note">${mode==='db'?'일정은 내 Claude 계정에 저장돼서, 같은 계정으로 이 페이지를 열면 폰·PC 어디서나 똑같이 보여요.':'일정은 이 폰(브라우저)에 저장돼요. 앱을 지우거나 방문 기록을 삭제하면 사라질 수 있어요.'}<br>탭 한 번 = 완료 · 두 번 탭 = 수정 · 꾹 눌러 끌기 = 다른 날로 옮기기 (달력 날짜에 놓으면 다른 주로)</p>
+    <div class="fld"><label>백업 · 다른 기기로 옮기기</label>
+      <div class="acts" style="margin-top:0"><button class="btn half" id="bkSave">백업 파일 저장</button><button class="btn half" id="bkLoad">파일 불러오기</button></div>
+      <div class="acts"><button class="btn half" id="bkCopy">백업 코드 복사</button><button class="btn half" id="bkPaste">코드 붙여넣기</button></div>
+      <p class="note" style="margin:2px 0 0">${lastBk()}코드를 카톡 '나와의 채팅'에 붙여두면 다른 폰·PC에서 '코드 붙여넣기'로 그대로 옮길 수 있어요.</p>
+      <input type="file" id="bkFile" accept=".json,application/json,text/plain" hidden></div>
     <div class="acts">${S.sample?'<button class="btn" id="ex">예시 지우기</button>':''}<button class="btn del" id="wipe" style="flex:1">모든 일정 지우기</button></div>
     <div class="acts"><button class="btn pri" id="done">완료</button></div>`);
   layer.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{S.settings.skin=b.dataset.s;applyLook();touchS();layer.querySelectorAll('[data-s]').forEach(x=>x.setAttribute('aria-pressed',x===b))});
   layer.querySelectorAll('[data-ft]').forEach(b=>b.onclick=()=>{S.settings.font=b.dataset.ft;applyLook();touchS();layer.querySelectorAll('[data-ft]').forEach(x=>x.setAttribute('aria-pressed',x===b))});
   $('#done').onclick=close;
+  $('#bkSave').onclick=saveBackup;
+  $('#bkCopy').onclick=async()=>{const t=backupText();try{await navigator.clipboard.writeText(t);markBk();toast('백업 코드를 복사했어요. 카톡 나와의 채팅에 붙여두세요')}catch(e){openPaste(t)}};
+  $('#bkLoad').onclick=()=>$('#bkFile').click();
+  $('#bkFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>confirmImport(r.result);r.readAsText(f)};
+  $('#bkPaste').onclick=()=>openPaste('');
   if($('#ex'))$('#ex').onclick=()=>{close();clearSample()};
   $('#wipe').onclick=()=>{
     if(!armed){armed=true;$('#wipe').textContent='한 번 더 누르면 전부 지워져요';return}
     touchAll();const keep=S.settings;S=blank();S.settings=keep;touchAll();close();render();toast('모든 일정을 지웠어요');
   };
+}
+
+/* ---------- backup ---------- */
+const BK='hanjuhanjang_lastbk';
+function backupText(){return JSON.stringify({app:'hanjuhanjang',v:1,at:new Date().toISOString(),data:S})}
+function markBk(){try{localStorage.setItem(BK,today())}catch(e){}}
+function lastBk(){let d=null;try{d=localStorage.getItem(BK)}catch(e){}return d?`마지막 백업 ${md(d)}. `:'아직 백업한 적이 없어요. '}
+async function saveBackup(){
+  const name=`한주한장_백업_${today()}.json`,blob=new Blob([backupText()],{type:'application/json'});
+  try{const f=new File([blob],name,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'한주한장 백업'});markBk();toast('백업 파일을 보냈어요');return}}catch(e){if(e&&e.name==='AbortError')return}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  markBk();toast('백업 파일을 저장했어요');
+}
+function parseBackup(t){try{const o=JSON.parse(String(t).trim());const d=o&&o.app==='hanjuhanjang'?o.data:o;if(d&&typeof d.days==='object'&&Array.isArray(d.repeats))return d}catch(e){}return null}
+function confirmImport(t){
+  const d=parseBackup(t);
+  if(!d){toast('한주한장 백업이 아니에요. 코드를 다시 확인해 주세요');return}
+  const n=Object.values(d.days).reduce((a,x)=>a+x.length,0)+d.repeats.length;
+  modal(`<h2>백업 불러오기</h2><p class="note">일정 ${n}개(반복 ${d.repeats.length}개 포함)가 들어 있어요. 불러오면 지금 이 기기의 일정은 백업 내용으로 바뀌어요.</p>
+    <div class="acts"><button class="btn" id="no">취소</button><button class="btn pri" id="yes">불러오기</button></div>`);
+  $('#no').onclick=close;
+  $('#yes').onclick=()=>{S=Object.assign(blank(),d);S.sample=false;applyLook();touchAll();close();goWeek(today());toast('백업을 불러왔어요')};
+}
+function openPaste(prefill){
+  modal(`<h2>${prefill?'백업 코드':'백업 코드 붙여넣기'}</h2>
+    <p class="note">${prefill?'아래 코드를 전부 길게 눌러 복사해서 카톡 나와의 채팅 등에 보관하세요.':'복사해 둔 백업 코드를 아래에 붙여넣어 주세요.'}</p>
+    <div class="fld"><textarea class="inp" id="pc" rows="6" style="font-size:12px;font-family:ui-monospace,monospace" ${prefill?'readonly':''} placeholder='{"app":"hanjuhanjang",...}'>${esc(prefill)}</textarea></div>
+    <div class="acts"><button class="btn" id="no">닫기</button>${prefill?'':'<button class="btn pri" id="yes">불러오기</button>'}</div>`);
+  const ta=$('#pc');if(prefill){ta.focus();ta.select();markBk()}else setTimeout(()=>ta.focus(),60);
+  $('#no').onclick=close;if(!prefill)$('#yes').onclick=()=>confirmImport(ta.value);
 }
 
 let toastT;function toast(t){let el=$('.toast');if(!el){el=document.createElement('div');el.className='toast';el.setAttribute('role','status');document.body.appendChild(el)}el.textContent=t;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,2200)}
