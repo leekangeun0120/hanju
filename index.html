@@ -98,6 +98,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .it:hover{background:color-mix(in srgb,var(--b) 7%,transparent)}
 .box{flex:none;width:14px;height:14px;margin-top:2px;border:1.5px solid var(--mute);border-radius:4px;display:grid;place-items:center}
 .it .tx{min-width:0;overflow-wrap:anywhere}
+.box{position:relative}.box::before{content:"";position:absolute;inset:-9px -7px -9px -9px}
 .it .rp{font-size:10px;color:var(--b);margin-left:3px;vertical-align:1px}
 .it.done .box{background:var(--b);border-color:var(--b)}
 .it.done .box::after{content:"";width:6px;height:3px;border:solid var(--onb);border-width:0 0 1.6px 1.6px;transform:translateY(-1px) rotate(-45deg)}
@@ -220,6 +221,7 @@ function ruleOn(r,d){
   const D=parse(d),St=parse(r.start);
   switch(r.freq){
     case'daily':return true;
+    case'weekdays':{const w=D.getDay();return w>0&&w<6}
     case'weekly':return(r.dow||[]).includes(D.getDay());
     case'monthly':return D.getDate()===St.getDate();
     case'yearly':return D.getDate()===St.getDate()&&D.getMonth()===St.getMonth();
@@ -235,6 +237,7 @@ const findItem=(d,id)=>itemsFor(d).find(x=>x.id===id);
 const ruleById=id=>S.repeats.find(r=>r.id===id);
 function freqLabel(r){
   if(r.freq==='daily')return'매일';
+  if(r.freq==='weekdays')return'평일마다';
   if(r.freq==='weekly'){const w=(r.dow||[]).slice().sort();if(w.join()==='1,2,3,4,5')return'평일마다';if(w.length===7)return'매일';return'매주 '+w.map(i=>DOW[i]).join('·')}
   const St=parse(r.start);
   if(r.freq==='monthly')return`매월 ${St.getDate()}일`;
@@ -397,7 +400,7 @@ let press=null,drag=null,pend=null;
 grid.addEventListener('contextmenu',e=>{if(e.target.closest('.it'))e.preventDefault()});
 grid.addEventListener('pointerdown',e=>{
   const li=e.target.closest('.it');if(!li||e.button>0)return;
-  press={li,d:li.dataset.d,id:li.dataset.id,x:e.clientX,y:e.clientY,cx:e.clientX,cy:e.clientY};
+  press={li,box:!!e.target.closest('.box'),d:li.dataset.d,id:li.dataset.id,x:e.clientX,y:e.clientY,cx:e.clientX,cy:e.clientY};
   press.timer=setTimeout(startDrag,380);
 });
 window.addEventListener('pointermove',e=>{
@@ -416,11 +419,8 @@ window.addEventListener('pointercancel',()=>{if(press){clearTimeout(press.timer)
 document.addEventListener('touchmove',e=>{if(drag)e.preventDefault()},{passive:false});
 
 function tap(p){
-  const key=p.d+'|'+p.id,now=Date.now();
-  if(pend&&pend.key===key&&now-pend.t<330){clearTimeout(pend.timer);pend=null;openSheet({mode:'edit',d:p.d,id:p.id});return}
-  if(pend){clearTimeout(pend.timer);pend.run()}
-  const run=()=>{pend=null;const it=findItem(p.d,p.id);if(it)toggle(p.d,it)};
-  pend={key,t:now,run,timer:setTimeout(run,300)};
+  if(p.box){const it=findItem(p.d,p.id);if(it)toggle(p.d,it)}
+  else openSheet({mode:'edit',d:p.d,id:p.id});
 }
 function startDrag(){
   if(!press)return;const p=press;press=null;
@@ -461,7 +461,7 @@ function openSheet(o){
       ${isR?`<div class="seg"><button id="s1" aria-pressed="${scope==='one'}">이 날만</button><button id="s2" aria-pressed="${scope==='all'}">반복 전체 · ${esc(freqLabel(rule))}</button></div>`:''}
       <div class="fld"><label for="fT">할 일</label><input class="inp" id="fT" maxlength="80" placeholder="예) 현장 점검 10시" value="${esc(all?rule.t:st.text)}" autocomplete="off"></div>
       ${all?`<p class="note">반복 일정 전체의 이름과 주기를 바꿔요. 시작일 ${md(rule.start)}</p>`:`<div class="fld"><label for="fD">날짜</label><input class="inp" type="date" id="fD" value="${st.date}"></div>`}
-      ${(!isR||all)?`<div class="fld"><label>반복</label><div class="row" id="fq">${(all?[]:[['none','안 함']]).concat([['daily','매일'],['weekly','매주'],['monthly','매월'],['yearly','매년']]).map(([k,l])=>`<button class="chip" data-f="${k}" aria-pressed="${freq===k}">${l}</button>`).join('')}</div></div>
+      ${(!isR||all)?`<div class="fld"><label>반복</label><div class="row" id="fq">${(all?[]:[['none','안 함']]).concat([['daily','매일'],['weekdays','평일'],['weekly','매주'],['monthly','매월'],['yearly','매년']]).map(([k,l])=>`<button class="chip" data-f="${k}" aria-pressed="${freq===k}">${l}</button>`).join('')}</div></div>
       <div class="fld" id="dw" ${freq==='weekly'?'':'hidden'}><label>요일</label><div class="row">${DOW.map((w,i)=>`<button class="chip dow" data-w="${i}" aria-pressed="${(all?rule.dow||[]:st.dow).includes(i)}">${w}</button>`).join('')}</div></div>`:''}
       ${o.mode==='edit'&&!all?`<div class="acts" style="margin-bottom:8px"><button class="btn half" id="pull">‹ 하루 당기기</button><button class="btn half" id="push">하루 미루기 ›</button></div>`:''}
       <div class="acts">${o.mode==='edit'?`<button class="btn del" id="del">${all?'반복 삭제':'삭제'}</button>`:''}<button class="btn" id="cancel">닫기</button><button class="btn pri" id="save">${o.mode==='add'?'추가':'저장'}</button></div>`);
@@ -534,7 +534,7 @@ function openSettings(){
   modal(`<h2>꾸미기 & 설정</h2>
     <div class="fld"><label>테마</label><div class="skins">${skins.map(([k,l,a,b])=>`<button class="skin" data-s="${k}" aria-pressed="${S.settings.skin===k}"><span class="sw"><i style="background:${a}"></i><i style="background:${b}"></i></span>${l}</button>`).join('')}</div></div>
     <div class="fld"><label>서체</label><div class="fonts">${fonts.map(([k,l,f])=>`<button class="fontb" data-ft="${k}" aria-pressed="${S.settings.font===k}" style="font-family:'${f}',sans-serif">오늘 할 일<small>${l}</small></button>`).join('')}</div></div>
-    <p class="note">${mode==='db'?'일정은 내 Claude 계정에 저장돼서, 같은 계정으로 이 페이지를 열면 폰·PC 어디서나 똑같이 보여요.':'일정은 이 폰(브라우저)에 저장돼요. 앱을 지우거나 방문 기록을 삭제하면 사라질 수 있어요.'}<br>탭 한 번 = 완료 · 두 번 탭 = 수정 · 꾹 눌러 끌기 = 다른 날로 옮기기 (달력 날짜에 놓으면 다른 주로)</p>
+    <p class="note">${mode==='db'?'일정은 내 Claude 계정에 저장돼서, 같은 계정으로 이 페이지를 열면 폰·PC 어디서나 똑같이 보여요.':'일정은 이 폰(브라우저)에 저장돼요. 앱을 지우거나 방문 기록을 삭제하면 사라질 수 있어요.'}<br>네모 탭 = 완료 · 글자 탭 = 수정·삭제 · 꾹 눌러 끌기 = 다른 날로 옮기기 (달력 날짜에 놓으면 다른 주로)</p>
     <div class="fld"><label>백업 · 다른 기기로 옮기기</label>
       <div class="acts" style="margin-top:0"><button class="btn half" id="bkSave">백업 파일 저장</button><button class="btn half" id="bkLoad">파일 불러오기</button></div>
       <div class="acts"><button class="btn half" id="bkCopy">백업 코드 복사</button><button class="btn half" id="bkPaste">코드 붙여넣기</button></div>
